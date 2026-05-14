@@ -4,6 +4,7 @@ import numpy as np
 import time
 import random
 import os
+import ctypes
 
 from backend.hand_tracker import HandTracker
 from backend.game_logic import Duck, Crosshair, Particle, Explosion
@@ -23,6 +24,7 @@ BOSS_MINION_SIZE = 60
 
 class DuckOpsGame:
     def __init__(self):
+        self.configure_windows_app_id()
         pygame.init()
         # Optimize mixer for low latency (buffer size 512)
         pygame.mixer.pre_init(44100, -16, 2, 512)
@@ -30,6 +32,7 @@ class DuckOpsGame:
         
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("Wing Commander: Duck Ops - AI Version 2.0")
+        self.set_window_icon()
         self.clock = pygame.time.Clock()
         
         # Initialize Database
@@ -44,6 +47,15 @@ class DuckOpsGame:
         self.setup_ui_elements()
         
         # Game State
+        self.current_user = None
+        self.user_settings = {
+            'music_volume': 0.5,
+            'sfx_volume': 0.5,
+            'is_fullscreen': 0,
+            'camera_index': 0,
+            'flip_camera': 1,
+            'tracking_sensitivity': 1.0
+        }
         last_user = self.db.get_last_user()
         if last_user:
             self.current_user = last_user
@@ -53,17 +65,8 @@ class DuckOpsGame:
             self.state = "HOME"
         else:
             self.state = "LOGIN"
-            self.current_user = None
-            self.user_settings = {
-                'music_volume': 0.5, 
-                'sfx_volume': 0.5, 
-                'is_fullscreen': 0, 
-                'camera_index': 0, 
-                'flip_camera': 1, 
-                'tracking_sensitivity': 1.0
-            }
-        
-        self.game_mode = None 
+
+        self.game_mode = None
         self.score = 0
         self.missiles = 3
         self.lives = 3
@@ -71,7 +74,7 @@ class DuckOpsGame:
         self.last_shot_time = 0
         self.last_rocket_time = 0
         self.last_menu_action_time = 0
-        
+
         # Camera & AI
         self.cap = cv2.VideoCapture(0)
         self.tracker = HandTracker()
@@ -86,27 +89,44 @@ class DuckOpsGame:
         self.screen_shake_until = 0
         self.screen_shake_magnitude = 0
         self.boot_message_until = 0
-        
+
         # Smoothing (Increased for better responsiveness)
         self.hand_x, self.hand_y = WIDTH // 2, HEIGHT // 2
-        self.lerp_factor = 0.4 
-        
+        self.lerp_factor = 0.4
+
         # Groups
         self.ducks = pygame.sprite.Group()
         self.all_sprites = pygame.sprite.Group()
         self.particles = pygame.sprite.Group()
-        
+
         self.crosshair = Crosshair(NEON_BLUE)
         self.all_sprites.add(self.crosshair)
-        
+
         self.settings_elements = {}
         self.lobby_music_playing = False
         self.confirm_exit_game = False
         self.exit_confirm_started = 0
-        
+
         self.running = True
 
         self.assets.apply_volumes(self.user_settings['music_volume'], self.user_settings['sfx_volume'])
+
+    def configure_windows_app_id(self):
+        if os.name != "nt":
+            return
+
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("WingCommander.DuckOps")
+        except Exception as exc:
+            print(f"Could not set Windows AppUserModelID: {exc}")
+
+    def set_window_icon(self):
+        icon_path = os.path.join("frontend", "images", "app_logo.png")
+        try:
+            icon = pygame.image.load(icon_path).convert_alpha()
+            pygame.display.set_icon(icon)
+        except Exception as exc:
+            print(f"Could not load window icon {icon_path}: {exc}")
 
     def setup_ui_elements(self):
         btn_font = self.assets.fonts['main']
