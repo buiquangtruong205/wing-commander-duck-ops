@@ -1,6 +1,7 @@
 import cv2
 import mediapipe as mp
 import time
+import math
 
 class HandTracker:
     def __init__(self):
@@ -28,6 +29,7 @@ class HandTracker:
             for hand_landmarks in self.results.multi_hand_landmarks:
                 # Landmark 8 is the Index Finger Tip
                 index_tip = hand_landmarks.landmark[8]
+                # Map normalized [0, 1] to screen width/height
                 x = int(index_tip.x * width)
                 y = int(index_tip.y * height)
                 return x, y
@@ -37,7 +39,7 @@ class HandTracker:
         """
         Detects:
         - Shooting: Index finger curl (Tip Y > PIP Y)
-        - Rocket: V-Sign (Index & Middle fingers up, others down)
+        - Rocket: V-Sign (Index & Middle fingers up, Ring & Pinky curled)
         """
         if not self.results or not self.results.multi_hand_landmarks:
             return {"shoot": False, "rocket": False}
@@ -45,28 +47,33 @@ class HandTracker:
         hand_landmarks = self.results.multi_hand_landmarks[0]
         landmarks = hand_landmarks.landmark
 
-        # Index finger landmarks
-        index_tip = landmarks[8]
-        index_pip = landmarks[6]
-        index_mcp = landmarks[5]
+        def is_finger_up(tip_idx, pip_idx):
+            # In MediaPipe, Y increases downwards, so Tip Y < PIP Y means Finger is UP
+            return landmarks[tip_idx].y < landmarks[pip_idx].y
 
-        # Middle finger landmarks
-        middle_tip = landmarks[12]
-        middle_pip = landmarks[10]
+        # Basic finger states
+        index_up = is_finger_up(8, 6)
+        middle_up = is_finger_up(12, 10)
+        ring_up = is_finger_up(16, 14)
+        pinky_up = is_finger_up(20, 18)
 
-        # Ring and Pinky for V-sign check
-        ring_tip = landmarks[16]
-        pinky_tip = landmarks[20]
+        # Shooting logic: Index tip is lower than DIP (more sensitive than PIP)
+        is_shooting = landmarks[8].y > landmarks[7].y
 
-        # Shooting logic: Index tip is lower than PIP (curled)
-        # Note: In MediaPipe, Y increases downwards
-        is_shooting = index_tip.y > index_pip.y
-
-        # Rocket logic (V-Sign): Index and Middle up, others down
-        # 'Up' means Tip.y < PIP.y (since Y increases downwards)
-        is_v_sign = (index_tip.y < index_pip.y and 
-                     middle_tip.y < middle_pip.y and 
-                     ring_tip.y > index_mcp.y and 
-                     pinky_tip.y > index_mcp.y)
+        # Rocket logic (V-Sign): Index and Middle up, Ring and Pinky curled
+        # We normalize the distance between fingers by the hand size (wrist to middle MCP)
+        # to ensure it works consistently at different distances from the camera.
+        hand_scale = math.hypot(landmarks[0].x - landmarks[9].x, landmarks[0].y - landmarks[9].y)
+        if hand_scale < 0.01: hand_scale = 0.1 # Safety fallback
+        
+        # Actual Euclidean distance between index and middle tips
+        tip_dist = math.hypot(landmarks[8].x - landmarks[12].x, landmarks[8].y - landmarks[12].y)
+        norm_dist = tip_dist / hand_scale
+        
+        is_v_sign = (index_up and 
+                     middle_up and 
+                     not ring_up and 
+                     not pinky_up and
+                     norm_dist > 0.45) # Require significant spread (xòe) relative to hand size
 
         return {"shoot": is_shooting, "rocket": is_v_sign}

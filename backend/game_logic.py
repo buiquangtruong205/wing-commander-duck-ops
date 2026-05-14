@@ -59,6 +59,7 @@ class Duck(pygame.sprite.Sprite):
         self.animation_speed = 0.1
         self.last_update = time.time()
         self.is_hit = False
+        self.has_entered_screen = False
 
     def load_frames(self, sheet):
         frames = []
@@ -106,8 +107,10 @@ class Duck(pygame.sprite.Sprite):
             if self.duck_type == "zigzag":
                 self.rect.y += math.sin(time.time() * 5) * 5
 
-            # Change direction if hitting top/bottom
-            if self.rect.top < 50 or self.rect.bottom > self.screen_height - 150:
+            # Change direction if hitting top/bottom after entering the play area.
+            hit_top = self.rect.top < 50 and self.speed_y < 0
+            hit_bottom = self.rect.bottom > self.screen_height - 150 and self.speed_y > 0 and self.rect.top < self.screen_height - 150
+            if hit_top or hit_bottom:
                 self.speed_y *= -1
             
             # Animation
@@ -129,6 +132,76 @@ class Duck(pygame.sprite.Sprite):
         if (self.rect.x < -200 or self.rect.x > self.screen_width + 200 or 
             self.rect.y > self.screen_height + 100):
             self.kill()
+
+class Boss(Duck):
+    def __init__(self, screen_width, screen_height, sprite_sheet, speed_multiplier=1.0):
+        super().__init__(screen_width, screen_height, sprite_sheet, "elite", speed_multiplier)
+        self.health = 25
+        self.max_health = 25
+        
+        # Scale to giant size
+        self.frames = [pygame.transform.scale(f, (250, 250)) for f in self.frames]
+        self.image = self.frames[0]
+        self.rect = self.image.get_rect(center=(screen_width // 2, -150))
+        
+        self.speed_x = random.uniform(1, 2) * speed_multiplier
+        self.speed_y = 1.0 # Descend initially
+        self.is_boss = True
+        self.last_minion_spawn_time = time.time()
+
+    def update(self):
+        if not self.is_hit:
+            # Boss specific movement: descend to 100-200 range then move horizontally
+            if self.rect.y < 100:
+                self.rect.y += self.speed_y
+            else:
+                self.rect.x += self.speed_x
+                # Hovering effect
+                self.rect.y += math.sin(time.time() * 2) * 2
+                
+                # Bounce off walls
+                if self.rect.right > self.screen_width - 50 or self.rect.left < 50:
+                    self.speed_x *= -1
+            
+            # Animation
+            now = time.time()
+            if now - self.last_update > self.animation_speed:
+                self.current_frame = (self.current_frame + 1) % len(self.frames)
+                self.image = self.frames[self.current_frame]
+                if self.speed_x < 0:
+                    self.image = pygame.transform.flip(self.image, True, False)
+                self.last_update = now
+        else:
+            # Falling
+            self.rect.y += 5
+            self.image = pygame.transform.rotate(self.frames[0], 180)
+            if self.rect.y > self.screen_height + 100:
+                self.kill()
+
+class Feather(pygame.sprite.Sprite):
+    def __init__(self, pos, screen_width, screen_height):
+        super().__init__()
+        self.screen_height = screen_height
+        # Create a simple feather shape or use a surface
+        self.image = pygame.Surface((20, 40), pygame.SRCALPHA)
+        pygame.draw.ellipse(self.image, (255, 255, 255, 200), (0, 0, 20, 40))
+        pygame.draw.line(self.image, (200, 200, 200), (10, 0), (10, 40), 2)
+        
+        self.rect = self.image.get_rect(center=pos)
+        self.speed_y = random.uniform(4, 7)
+        self.speed_x = random.uniform(-2, 2)
+        self.rotation = 0
+
+    def update(self):
+        self.rect.y += self.speed_y
+        self.rect.x += self.speed_x
+        self.rotation = (self.rotation + 5) % 360
+        # For simplicity, we won't rotate the actual image here to keep it light
+        
+        if self.rect.top > self.screen_height:
+            self.kill()
+            return True # Signal hit bottom
+        return False
 
 class Crosshair(pygame.sprite.Sprite):
     def __init__(self, color=(0, 255, 255)):
@@ -170,3 +243,29 @@ class Particle(pygame.sprite.Sprite):
         self.lifetime -= 1
         if self.lifetime <= 0:
             self.kill()
+
+class Explosion(pygame.sprite.Sprite):
+    def __init__(self, pos, image, lifetime=18):
+        super().__init__()
+        self.base_image = image
+        self.lifetime = lifetime
+        self.max_lifetime = lifetime
+        self.image = self.base_image.copy()
+        self.rect = self.image.get_rect(center=pos)
+
+    def update(self):
+        self.lifetime -= 1
+        if self.lifetime <= 0:
+            self.kill()
+            return
+
+        progress = 1 - (self.lifetime / self.max_lifetime)
+        scale = 0.75 + progress * 0.45
+        alpha = max(0, int(255 * (self.lifetime / self.max_lifetime)))
+        width = max(1, int(self.base_image.get_width() * scale))
+        height = max(1, int(self.base_image.get_height() * scale))
+        center = self.rect.center
+
+        self.image = pygame.transform.smoothscale(self.base_image, (width, height))
+        self.image.set_alpha(alpha)
+        self.rect = self.image.get_rect(center=center)

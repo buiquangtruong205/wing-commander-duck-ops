@@ -116,13 +116,20 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT username, MAX(highest_score) as top_score 
+                SELECT username, difficulty, highest_score, achieved_date
                 FROM HighScores 
-                GROUP BY username 
-                ORDER BY top_score DESC 
+                ORDER BY difficulty ASC, highest_score DESC, achieved_date DESC
                 LIMIT ?
             """, (limit,))
-            return [{"name": row[0], "score": row[1]} for row in cursor.fetchall()]
+            return [
+                {
+                    "name": row[0],
+                    "mode": row[1],
+                    "score": row[2],
+                    "date": row[3],
+                }
+                for row in cursor.fetchall()
+            ]
 
     def get_last_user(self):
         with self.get_connection() as conn:
